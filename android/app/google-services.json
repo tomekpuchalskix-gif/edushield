@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "689408176481",
+    "project_id": "edushield-73506",
+    "storage_bucket": "edushield-73506.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:689408176481:android:3b09e5bf65d302258e1520",
+        "android_client_info": {
+          "package_name": "com.example.edushieldup"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDdQzvfLHUsDhGL3ph48f9_Nd3cus_tDmU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
