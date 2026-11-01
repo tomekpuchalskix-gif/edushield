@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 
-import 'parent_panel.dart';
+import 'models.dart';
+import 'child_lock.dart';
 
 class ParentAuthScreen extends StatefulWidget {
   const ParentAuthScreen({super.key});
@@ -11,148 +11,34 @@ class ParentAuthScreen extends StatefulWidget {
 }
 
 class _ParentAuthScreenState extends State<ParentAuthScreen> {
-  bool isLoginMode = true;
-  final TextEditingController _emailCtrl = TextEditingController();
-  final TextEditingController _passCtrl = TextEditingController();
-  final TextEditingController _confirmPassCtrl = TextEditingController();
-  bool isLoading = false;
+  final TextEditingController _pinController = TextEditingController();
+  bool _showError = false;
 
-  Future<void> _submitAuth() async {
-    String email = _emailCtrl.text.trim();
-    String pass = _passCtrl.text.trim();
+  void _verifyPin() async {
+    // Symulacja operacji asynchronicznej (np. odczyt bazy danych / zapisu)
+    await Future.delayed(const Duration(milliseconds: 100));
 
-    if (email.isEmpty || pass.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('❌ Wypełnij wszystkie pola!')),
-      );
-      return;
-    }
+    // Zabezpieczenie przed użyciem contextu po async gap
+    if (!mounted) return;
 
-    setState(() => isLoading = true);
-
-    try {
-      if (isLoginMode) {
-        // Logowanie przez Firebase Auth
-        await FirebaseAuth.instance.signInWithEmailAndPassword(
-          email: email,
-          password: pass,
-        );
-      } else {
-        if (pass != _confirmPassCtrl.text.trim()) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('❌ Hasła muszą być takie same!')),
-          );
-          setState(() => isLoading = false);
-          return;
-        }
-        // Rejestracja nowego opiekuna w Firebase Auth
-        await FirebaseAuth.instance.createUserWithEmailAndPassword(
-          email: email,
-          password: pass,
-        );
-
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('✅ Rejestracja pomyślna! Zalogowano.')),
-        );
-      }
-
-      if (!mounted) return;
+    if (_pinController.text == '1234') {
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (context) => const ParentDashboardScreen()),
+        MaterialPageRoute(builder: (context) => const ParentDashboardWrapper()),
       );
-    } on FirebaseAuthException catch (e) {
-      if (!mounted) return;
-      String message = 'Wystąpił błąd autoryzacji';
-      if (e.code == 'user-not-found') {
-        message = 'Nie znaleziono użytkownika o takim adresie e-mail.';
-      } else if (e.code == 'wrong-password') {
-        message = 'Błędne hasło.';
-      } else if (e.code == 'email-already-in-use') {
-        message = 'Ten e-mail jest już zarejestrowany.';
-      } else if (e.code == 'weak-password') {
-        message = 'Podane hasło jest zbyt słabe.';
-      } else if (e.code == 'invalid-credential') {
-        message = 'Nieprawidłowy e-mail lub hasło.';
-      } else {
-        message = e.message ?? message;
-      }
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('❌ $message')));
-    } finally {
-      if (mounted) setState(() => isLoading = false);
+    } else {
+      setState(() {
+        _showError = true;
+      });
     }
   }
 
-  void _showForgotPasswordDialog() {
-    TextEditingController resetEmailCtrl = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          backgroundColor: Colors.white,
-          title: const Text(
-            '🔑 Resetowanie hasła',
-            style: TextStyle(fontWeight: FontWeight.bold),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'Wpisz swój adres e-mail, aby otrzymać link do zresetowania hasła:',
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: resetEmailCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Adres e-mail',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Anuluj', style: TextStyle(color: Colors.grey)),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF2A6B52),
-                foregroundColor: Colors.white,
-              ),
-              onPressed: () async {
-                String email = resetEmailCtrl.text.trim();
-                if (email.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('❌ Wpisz adres e-mail!')),
-                  );
-                  return;
-                }
-                try {
-                  await FirebaseAuth.instance.sendPasswordResetEmail(
-                    email: email,
-                  );
-                  if (!context.mounted) return;
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('✅ Wysłano link resetujący na e-mail!'),
-                    ),
-                  );
-                } on FirebaseAuthException catch (e) {
-                  if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('❌ Błąd: ${e.message}')),
-                  );
-                }
-              },
-              child: const Text('Wyślij link'),
-            ),
-          ],
-        );
-      },
+  void _goBack() {
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (context) => LockScreenWidget(onUnlocked: () {}),
+      ),
     );
   }
 
@@ -161,119 +47,135 @@ class _ParentAuthScreenState extends State<ParentAuthScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF3F6F8),
       body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 440),
+        child: SingleChildScrollView(
           child: Container(
-            padding: const EdgeInsets.all(32),
+            width: 400,
+            padding: const EdgeInsets.all(28.0),
             decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius: BorderRadius.circular(20),
+              borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
                   color: Colors.black.withValues(alpha: 0.08),
-                  blurRadius: 25,
+                  blurRadius: 15,
+                  offset: const Offset(0, 4),
                 ),
               ],
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Icon(
-                  Icons.admin_panel_settings,
-                  size: 60,
-                  color: Color(0xFF2A6B52),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  isLoginMode
-                      ? 'Panel Rodzica - Logowanie'
-                      : 'Rejestracja Konta',
-                  style: const TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 24),
-                TextField(
-                  controller: _emailCtrl,
-                  decoration: InputDecoration(
-                    labelText: 'Adres e-mail',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
+                const Row(
+                  children: [
+                    Icon(
+                      Icons.lock_outline,
+                      color: Color(0xFF2A6B52),
+                      size: 24,
                     ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _passCtrl,
-                  obscureText: true,
-                  decoration: InputDecoration(
-                    labelText: 'Hasło',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                ),
-                if (!isLoginMode) ...[
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _confirmPassCtrl,
-                    obscureText: true,
-                    decoration: InputDecoration(
-                      labelText: 'Powtórz hasło',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
+                    SizedBox(width: 8),
+                    Text(
+                      'Panel Rodzica',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Wpisz 4-cyfrowy kod PIN, aby przejść do ustawień:',
+                  style: TextStyle(fontSize: 13, color: Colors.grey),
+                ),
                 const SizedBox(height: 20),
-                isLoading
-                    ? const CircularProgressIndicator(color: Color(0xFF2A6B52))
-                    : ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF2A6B52),
-                          foregroundColor: Colors.white,
-                          minimumSize: const Size(double.infinity, 50),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        onPressed: _submitAuth,
-                        child: Text(
-                          isLoginMode ? 'Zaloguj się' : 'Zarejestruj się',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                          ),
-                        ),
-                      ),
-                const SizedBox(height: 10),
-                if (isLoginMode)
-                  TextButton(
-                    onPressed: _showForgotPasswordDialog,
-                    child: const Text(
-                      'Nie pamiętam hasła?',
-                      style: TextStyle(color: Color(0xFF2A6B52)),
-                    ),
+                TextField(
+                  controller: _pinController,
+                  obscureText: true,
+                  keyboardType: TextInputType.number,
+                  maxLength: 4,
+                  decoration: InputDecoration(
+                    labelText: 'Kod PIN (np. 1234)',
+                    errorText: _showError ? 'Niepoprawny kod PIN!' : null,
+                    border: const OutlineInputBorder(),
                   ),
-                TextButton(
-                  onPressed: () => setState(() => isLoginMode = !isLoginMode),
-                  child: Text(
-                    isLoginMode
-                        ? 'Nie masz konta? Zarejestruj się'
-                        : 'Masz konto? Zaloguj się',
-                  ),
+                  onSubmitted: (_) => _verifyPin(),
                 ),
-                const Divider(height: 20),
-                TextButton.icon(
-                  onPressed: () => Navigator.pop(context),
-                  icon: const Icon(Icons.arrow_back, size: 16),
-                  label: const Text('Powrót do trybu dziecka'),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2A6B52),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.all(14),
+                  ),
+                  onPressed: _verifyPin,
+                  child: const Text('Wejdź', style: TextStyle(fontSize: 15)),
+                ),
+                const SizedBox(height: 12),
+                TextButton(
+                  onPressed: _goBack,
+                  child: const Text(
+                    'Wróć do trybu dziecka',
+                    style: TextStyle(color: Colors.grey),
+                  ),
                 ),
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// Pomocniczy widok dla Panelu Rodzica po autoryzacji
+class ParentDashboardWrapper extends StatelessWidget {
+  const ParentDashboardWrapper({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Panel Zarządzania Rodzica'),
+        backgroundColor: const Color(0xFF2A6B52),
+        foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.exit_to_app),
+            onPressed: () {
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => LockScreenWidget(onUnlocked: () {}),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: ListView(
+          children: [
+            const Text(
+              'Zarządzanie profilem i czasem dziecka',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF2A6B52),
+              ),
+            ),
+            const SizedBox(height: 16),
+            ...globalProfiles.map(
+              (profile) => Card(
+                child: ListTile(
+                  leading: const Icon(Icons.person, color: Color(0xFF2A6B52)),
+                  title: Text(profile.name),
+                  subtitle: Text('Klasa: ${profile.statusClass}'),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

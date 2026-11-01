@@ -1,1035 +1,1824 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
-import 'package:window_manager/window_manager.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:http/http.dart' as http;
+
+import 'dart:convert';
 
 import 'models.dart';
 import 'child_lock.dart';
+import 'register_screen.dart';
+import 'interests_data.dart';
 
-const List<String> availableTextbooks = [
-  'Standardowy Podręcznik MEN / Wbudowany',
-  'Matematyka z plusem (GWO)',
-  'English Class (Pearson)',
-  'Steps Plus (Oxford)',
-  'Tajemnice przyrody (Nowa Era)',
-  'Między nami (GWO - Język polski)',
-];
-
-const Map<int, String> dayNamesMap = {
-  1: 'Poniedziałek',
-  2: 'Wtorek',
-  3: 'Środa',
-  4: 'Czwartek',
-  5: 'Piątek',
-  6: 'Sobota',
-  7: 'Niedziela',
-};
+// Zmienne globalne do obsługi powiadomienia o aktualizacji z GitHuba
+bool globalUpdateAvailable = false;
+String globalLatestVersion = '';
 
 class ParentDashboardScreen extends StatefulWidget {
-  const ParentDashboardScreen({super.key});
+  final bool initialAuthorized;
+
+  const ParentDashboardScreen({super.key, this.initialAuthorized = false});
 
   @override
   State<ParentDashboardScreen> createState() => _ParentDashboardScreenState();
 }
 
 class _ParentDashboardScreenState extends State<ParentDashboardScreen> {
+  final TextEditingController _pinController = TextEditingController();
+  late bool _isAuthorized;
   int _selectedNavIndex = 0;
-  int _selectedProfileIndex = 0;
+  int _activeChildIndex = 0;
 
-  void _minimizeApp() async {
-    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
-      await windowManager.setFullScreen(false);
-      await windowManager.setAlwaysOnTop(false);
-      await windowManager.minimize();
-    }
-  }
+  String _selectedDay = 'Poniedziałek';
 
-  void _closeApp() async {
-    exit(0);
-  }
+  final List<String> _daysOfWeek = [
+    'Poniedziałek',
+    'Wtorek',
+    'Środa',
+    'Czwartek',
+    'Piątek',
+  ];
 
-  void _returnToChildMode(BuildContext ctx) async {
-    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
-      await windowManager.setFullScreen(true);
-      await windowManager.setAlwaysOnTop(true);
-      await windowManager.focus();
-    }
-    if (!mounted) return;
-
-    // ignore: use_build_context_synchronously
-    if (!ctx.mounted) return;
-
-    Navigator.pushAndRemoveUntil(
-      ctx,
-      MaterialPageRoute(
-        builder: (context) => LockScreenWidget(profile: globalProfiles.first),
-      ),
-      (route) => false,
-    );
-  }
-
-  void _showAddChildDialog() {
-    TextEditingController nameCtrl = TextEditingController();
-    TextEditingController classCtrl = TextEditingController();
-    TextEditingController interestsCtrl = TextEditingController();
-    MotivationType selectedMotivation = MotivationType.gamer;
-
-    showDialog(
-      context: context,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (dialogContext, setModalState) {
-            return AlertDialog(
-              backgroundColor: Colors.white,
-              title: const Row(
-                children: [
-                  Icon(Icons.person_add, color: Color(0xFF2A6B52)),
-                  SizedBox(width: 8),
-                  Text(
-                    'Dodaj nowe dziecko',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                ],
-              ),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextField(
-                      controller: nameCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Imię dziecka',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: classCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Klasa (np. Klasa 5 SP)',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<MotivationType>(
-                      // ignore: deprecated_member_use
-                      value: selectedMotivation,
-                      decoration: const InputDecoration(
-                        labelText: 'Typ motywacji',
-                        border: OutlineInputBorder(),
-                      ),
-                      items: const [
-                        DropdownMenuItem(
-                          value: MotivationType.gamer,
-                          child: Text('Gracz'),
-                        ),
-                        DropdownMenuItem(
-                          value: MotivationType.explorer,
-                          child: Text('Odkrywca'),
-                        ),
-                        DropdownMenuItem(
-                          value: MotivationType.observer,
-                          child: Text('Obserwator'),
-                        ),
-                      ],
-                      onChanged: (val) {
-                        if (val != null) {
-                          setModalState(() {
-                            selectedMotivation = val;
-                          });
-                        }
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: interestsCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Zainteresowania (oddzielone przecinkami)',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(dialogContext),
-                  child: const Text(
-                    'Anuluj',
-                    style: TextStyle(color: Colors.grey),
-                  ),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2A6B52),
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: () {
-                    if (nameCtrl.text.trim().isNotEmpty) {
-                      String newId = nameCtrl.text
-                          .trim()
-                          .toLowerCase()
-                          .replaceAll(' ', '_');
-                      List<String> interestsList = interestsCtrl.text
-                          .split(',')
-                          .map((e) => e.trim())
-                          .where((e) => e.isNotEmpty)
-                          .toList();
-
-                      ChildProfileEntity newChild = ChildProfileEntity(
-                        id: newId,
-                        name: nameCtrl.text.trim(),
-                        statusClass: classCtrl.text.trim().isEmpty
-                            ? 'Klasa 4 SP'
-                            : classCtrl.text.trim(),
-                        motivationType: selectedMotivation,
-                        interests: interestsList.isEmpty
-                            ? ['Edukacja', 'Gry']
-                            : interestsList,
-                        weeklySchedule: {
-                          1: ['Język polski', 'Matematyka'],
-                          2: ['Matematyka', 'Język angielski'],
-                        },
-                        subjectsConfig: {
-                          'Matematyka': SubjectConfiguration(
-                            subjectName: 'Matematyka',
-                            selectedTextbook: 'Matematyka z plusem (GWO)',
-                          ),
-                        },
-                      );
-
-                      setState(() {
-                        globalProfiles.add(newChild);
-                        _selectedProfileIndex = globalProfiles.length - 1;
-                      });
-
-                      Navigator.pop(dialogContext);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            '✅ Pomyślnie dodano dziecko: ${newChild.name}!',
-                          ),
-                        ),
-                      );
-                    }
-                  },
-                  child: const Text('Dodaj'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
+  @override
+  void initState() {
+    super.initState();
+    _isAuthorized = widget.initialAuthorized;
+    _checkForUpdatesSilently();
   }
 
   @override
-  Widget build(BuildContext context) {
-    final activeProfile = globalProfiles[_selectedProfileIndex];
+  void dispose() {
+    _pinController.dispose();
+    super.dispose();
+  }
 
-    return Scaffold(
-      body: Material(
-        color: Colors.white,
-        child: Row(
-          children: [
-            Container(
-              width: 190,
-              color: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFE8F5E9),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Icon(
-                          Icons.shield,
-                          color: Color(0xFF2A6B52),
-                          size: 24,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      const Text(
-                        'EduShield',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18,
-                          color: Colors.black87,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 28),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                          vertical: 10,
-                          horizontal: 8,
-                        ),
-                        side: const BorderSide(color: Color(0xFF2A6B52)),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                      onPressed: _showAddChildDialog,
-                      icon: const Icon(
-                        Icons.person_add_alt_1,
-                        size: 16,
-                        color: Color(0xFF2A6B52),
-                      ),
-                      label: const Text(
-                        'Dodaj dziecko',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF2A6B52),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  _buildNavItem(0, Icons.home_outlined, Icons.home, 'Pulpit'),
-                  _buildNavItem(
-                    1,
-                    Icons.calendar_today_outlined,
-                    Icons.calendar_today,
-                    'Plan lekcji',
-                  ),
-                  _buildNavItem(
-                    2,
-                    Icons.show_chart_outlined,
-                    Icons.show_chart,
-                    'Postępy',
-                  ),
-                  _buildNavItem(
-                    3,
-                    Icons.phonelink_setup_outlined,
-                    Icons.phonelink_setup,
-                    'Kontrola aplikacji',
-                  ),
-                  const Spacer(),
-                  Divider(color: Colors.grey.shade200),
-                  ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(
-                      Icons.arrow_back,
-                      color: Color(0xFF2A6B52),
-                    ),
-                    title: const Text(
-                      'Tryb dziecka',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF2A6B52),
-                      ),
-                    ),
-                    onTap: () => _returnToChildMode(context),
-                  ),
-                  ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.minimize, color: Colors.grey),
-                    title: const Text(
-                      'Zminimalizuj',
-                      style: TextStyle(fontSize: 12, color: Colors.grey),
-                    ),
-                    onTap: _minimizeApp,
-                  ),
-                  ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(
-                      Icons.power_settings_new,
-                      color: Colors.redAccent,
-                    ),
-                    title: const Text(
-                      'Zamknij',
-                      style: TextStyle(fontSize: 12, color: Colors.redAccent),
-                    ),
-                    onTap: _closeApp,
-                  ),
-                ],
-              ),
-            ),
-            VerticalDivider(
-              width: 1,
-              thickness: 1,
-              color: Colors.grey.shade200,
-            ),
-            Expanded(
-              child: Column(
-                children: [
-                  Container(
-                    height: 64,
-                    padding: const EdgeInsets.symmetric(horizontal: 24),
-                    color: Colors.white,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          _getSectionTitle(_selectedNavIndex),
-                          style: const TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.black87,
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF3F6F8),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.grey.shade300),
-                          ),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<int>(
-                              // ignore: deprecated_member_use
-                              value:
-                                  (_selectedProfileIndex >= 0 &&
-                                      _selectedProfileIndex <
-                                          globalProfiles.length)
-                                  ? _selectedProfileIndex
-                                  : 0,
-                              icon: const Icon(
-                                Icons.arrow_drop_down,
-                                color: Color(0xFF2A6B52),
-                              ),
-                              items: globalProfiles.asMap().entries.map((
-                                entry,
-                              ) {
-                                int index = entry.key;
-                                ChildProfileEntity child = entry.value;
-                                return DropdownMenuItem<int>(
-                                  value: index,
-                                  child: Row(
-                                    children: [
-                                      const Icon(
-                                        Icons.face,
-                                        size: 20,
-                                        color: Color(0xFF2A6B52),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Text(
-                                        child.name,
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 13,
-                                          color: Colors.black87,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              }).toList(),
-                              onChanged: (val) {
-                                if (val != null) {
-                                  setState(() {
-                                    _selectedProfileIndex = val;
-                                  });
-                                }
-                              },
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Divider(height: 1, thickness: 1, color: Colors.grey.shade200),
-                  Expanded(
-                    child: IndexedStack(
-                      index: _selectedNavIndex,
-                      children: [
-                        _buildDashboardContent(activeProfile),
-                        _buildScheduleContent(activeProfile),
-                        _buildProgressContent(activeProfile),
-                        _buildAppControlContent(activeProfile),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
+  // Sprawdzanie aktualizacji z GitHuba w tle
+  Future<void> _checkForUpdatesSilently() async {
+    try {
+      final url = Uri.parse(
+        'https://raw.githubusercontent.com/tomekpuchalskix-gif/edushield/main/version.json',
+      );
+
+      final response = await http.get(url);
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final String latestVersion = data['version'];
+        const String currentVersion = '1.0.0';
+
+        if (latestVersion != currentVersion) {
+          if (!mounted) return;
+
+          setState(() {
+            globalUpdateAvailable = true;
+            globalLatestVersion = latestVersion;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Błąd sprawdzania aktualizacji: $e');
+    }
+  }
+
+  String get _currentParentUid {
+    final user = FirebaseAuth.instance.currentUser;
+    return user != null ? user.uid : 'guest_parent';
+  }
+
+  Future<void> _saveChildToFirestore(ChildProfileEntity child) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('children')
+          .doc(child.id)
+          .set(child.toMap());
+    } catch (e) {
+      debugPrint('Błąd zapisu dziecka do Firestore: $e');
+    }
+  }
+
+  Future<void> _saveExamToFirestore(ExamEntity exam) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('exams')
+          .doc(exam.id)
+          .set(exam.toMap());
+    } catch (e) {
+      debugPrint('Błąd zapisu sprawdzianu do Firestore: $e');
+    }
+  }
+
+  void _verifyMasterPin() {
+    if (_pinController.text == ParentAccount.pin) {
+      setState(() {
+        _isAuthorized = true;
+      });
+    } else {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Niepoprawny kod PIN!')));
+    }
+  }
+
+  void _returnToChildLock(List<ChildProfileEntity> myChildren) {
+    if (myChildren.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Najpierw dodaj swoje dziecko, aby przejść do trybu nauki!',
+          ),
         ),
+      );
+      return;
+    }
+
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (context) => LockScreenWidget(onUnlocked: () {}),
       ),
     );
   }
 
-  Widget _buildNavItem(
-    int index,
-    IconData icon,
-    IconData activeIcon,
-    String label,
-  ) {
-    final isSelected = _selectedNavIndex == index;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      child: ListTile(
-        selected: isSelected,
-        selectedTileColor: const Color(0xFFE8F5E9),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        leading: Icon(
-          isSelected ? activeIcon : icon,
-          color: isSelected ? const Color(0xFF2A6B52) : Colors.grey.shade600,
-          size: 20,
-        ),
-        title: Text(
-          label,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-            color: isSelected ? const Color(0xFF2A6B52) : Colors.black87,
-          ),
-        ),
-        onTap: () {
-          setState(() {
-            _selectedNavIndex = index;
-          });
+  void _logout() async {
+    await FirebaseAuth.instance.signOut();
+
+    if (!mounted) return;
+
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (context) => const RegisterScreen()),
+    );
+  }
+
+  /// Okno dodawania dziecka
+  void _showAddChildDialog() {
+    TextEditingController nameController = TextEditingController();
+    TextEditingController customInterestController = TextEditingController();
+
+    String selectedSchoolType = 'Szkoła podstawowa';
+
+    List<String> primaryClasses = [
+      'Klasa 1',
+      'Klasa 2',
+      'Klasa 3',
+      'Klasa 4',
+      'Klasa 5',
+      'Klasa 6',
+      'Klasa 7',
+      'Klasa 8',
+    ];
+
+    List<String> highClasses = [
+      'Klasa 1',
+      'Klasa 2',
+      'Klasa 3',
+      'Klasa 4',
+      'Klasa 5',
+    ];
+
+    String selectedClass = primaryClasses.first;
+
+    List<String> availableInterests = List.from(InterestsData.defaultInterests);
+
+    List<String> selectedInterests = ['Gry wideo', 'LEGO'];
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final currentClassesList = selectedSchoolType == 'Szkoła podstawowa'
+              ? primaryClasses
+              : highClasses;
+
+          if (!currentClassesList.contains(selectedClass)) {
+            selectedClass = currentClassesList.first;
+          }
+
+          return AlertDialog(
+            title: const Text('Dodaj swoje dziecko'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextField(
+                    controller: nameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Imię dziecka',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Typ szkoły:',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
+                  const SizedBox(height: 6),
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedSchoolType,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'Szkoła podstawowa',
+                        child: Text('Szkoła podstawowa'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'Szkoła średnia / Technikum',
+                        child: Text('Szkoła średnia / Technikum'),
+                      ),
+                    ],
+                    onChanged: (val) {
+                      if (val != null) {
+                        setDialogState(() {
+                          selectedSchoolType = val;
+                          selectedClass =
+                              selectedSchoolType == 'Szkoła podstawowa'
+                              ? primaryClasses.first
+                              : highClasses.first;
+                        });
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Klasa:',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
+                  const SizedBox(height: 6),
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedClass,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                    ),
+                    items: currentClassesList
+                        .map(
+                          (cls) =>
+                              DropdownMenuItem(value: cls, child: Text(cls)),
+                        )
+                        .toList(),
+                    onChanged: (val) {
+                      if (val != null) {
+                        setDialogState(() {
+                          selectedClass = val;
+                        });
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 20),
+                  const Text(
+                    'Zainteresowania (wybierz lub dopisz własne):',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8.0,
+                    runSpacing: 4.0,
+                    children: availableInterests.map((interest) {
+                      final isSelected = selectedInterests.contains(interest);
+
+                      return FilterChip(
+                        label: Text(interest),
+                        selected: isSelected,
+                        selectedColor: const Color(0xFFE2F0EC),
+                        checkmarkColor: const Color(0xFF2A6B52),
+                        labelStyle: TextStyle(
+                          color: isSelected
+                              ? const Color(0xFF2A6B52)
+                              : Colors.black87,
+                          fontWeight: isSelected
+                              ? FontWeight.bold
+                              : FontWeight.normal,
+                          fontSize: 12,
+                        ),
+                        onSelected: (bool selected) {
+                          setDialogState(() {
+                            if (selected) {
+                              selectedInterests.add(interest);
+                            } else {
+                              selectedInterests.remove(interest);
+                            }
+                          });
+                        },
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: customInterestController,
+                          decoration: const InputDecoration(
+                            labelText: 'Wpisz inne zainteresowanie...',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF2A6B52),
+                          foregroundColor: Colors.white,
+                        ),
+                        onPressed: () {
+                          final customVal = customInterestController.text
+                              .trim();
+
+                          if (customVal.isEmpty) return;
+
+                          if (!ContentFilter.isSafe(customVal)) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'To słowo zawiera niedozwolone treści!',
+                                ),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                            return;
+                          }
+
+                          if (!availableInterests.contains(customVal)) {
+                            setDialogState(() {
+                              availableInterests.add(customVal);
+                              selectedInterests.add(customVal);
+                              customInterestController.clear();
+                            });
+                          }
+                        },
+                        child: const Text('Dodaj'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text(
+                  'Anuluj',
+                  style: TextStyle(color: Colors.grey),
+                ),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2A6B52),
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () async {
+                  if (nameController.text.trim().isNotEmpty) {
+                    final finalInterests = selectedInterests.isNotEmpty
+                        ? selectedInterests
+                        : ['Ogólne'];
+
+                    final newChild = ChildProfileEntity(
+                      id: DateTime.now().millisecondsSinceEpoch.toString(),
+                      parentId: _currentParentUid,
+                      name: nameController.text.trim(),
+                      schoolType: selectedSchoolType,
+                      statusClass: selectedClass,
+                      motivationType: MotivationType.explorer,
+                      interests: finalInterests,
+                      weeklySchedule: {},
+                      subjectsConfig: {},
+                    );
+
+                    await _saveChildToFirestore(newChild);
+
+                    // Poprawka: sprawdzamy oba konteksty po await.
+                    if (!mounted || !context.mounted) return;
+
+                    setState(() {
+                      _activeChildIndex = 0;
+                    });
+
+                    Navigator.pop(context);
+
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          'Dodano profil: ${newChild.name} '
+                          '($selectedSchoolType, $selectedClass)',
+                        ),
+                      ),
+                    );
+                  }
+                },
+                child: const Text('Zapisz'),
+              ),
+            ],
+          );
         },
       ),
     );
   }
 
-  String _getSectionTitle(int index) {
-    switch (index) {
-      case 0:
-        return 'Pulpit Rodzica';
-      case 1:
-        return 'Zarządzanie Planem Lekcji';
-      case 2:
-        return 'Raport Postępów Edukacyjnych';
-      case 3:
-        return 'Kontrola Aplikacji i Czasu';
-      default:
-        return 'Pulpit';
-    }
-  }
+  /// Okno edycji istniejącego profilu dziecka
+  void _showEditChildDialog(ChildProfileEntity child) {
+    TextEditingController nameController = TextEditingController(
+      text: child.name,
+    );
 
-  Widget _buildDashboardContent(ChildProfileEntity profile) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(32),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 600),
-          child: Column(
-            children: [
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(28),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.04),
-                      blurRadius: 15,
-                      offset: const Offset(0, 4),
+    TextEditingController customInterestController = TextEditingController();
+
+    String selectedSchoolType = child.schoolType;
+
+    List<String> primaryClasses = [
+      'Klasa 1',
+      'Klasa 2',
+      'Klasa 3',
+      'Klasa 4',
+      'Klasa 5',
+      'Klasa 6',
+      'Klasa 7',
+      'Klasa 8',
+    ];
+
+    List<String> highClasses = [
+      'Klasa 1',
+      'Klasa 2',
+      'Klasa 3',
+      'Klasa 4',
+      'Klasa 5',
+    ];
+
+    String selectedClass =
+        primaryClasses.contains(child.statusClass) ||
+            highClasses.contains(child.statusClass)
+        ? child.statusClass
+        : 'Klasa 1';
+
+    List<String> availableInterests = List.from(InterestsData.defaultInterests);
+
+    for (var interest in child.interests) {
+      if (!availableInterests.contains(interest)) {
+        availableInterests.add(interest);
+      }
+    }
+
+    List<String> selectedInterests = List.from(child.interests);
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final currentClassesList = selectedSchoolType == 'Szkoła podstawowa'
+              ? primaryClasses
+              : highClasses;
+
+          if (!currentClassesList.contains(selectedClass)) {
+            selectedClass = currentClassesList.first;
+          }
+
+          return AlertDialog(
+            title: Text('Edytuj profil: ${child.name}'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextField(
+                    controller: nameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Imię dziecka',
+                      border: OutlineInputBorder(),
                     ),
-                  ],
-                ),
-                child: Column(
-                  children: [
-                    Container(
-                      width: 90,
-                      height: 90,
-                      decoration: const BoxDecoration(
-                        color: Color(0xFFA8E6CF),
-                        shape: BoxShape.circle,
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Typ szkoły:',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
+                  const SizedBox(height: 6),
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedSchoolType,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'Szkoła podstawowa',
+                        child: Text('Szkoła podstawowa'),
                       ),
-                      child: const Center(
-                        child: Icon(
-                          Icons.face,
-                          size: 60,
-                          color: Color(0xFF2A6B52),
+                      DropdownMenuItem(
+                        value: 'Szkoła średnia / Technikum',
+                        child: Text('Szkoła średnia / Technikum'),
+                      ),
+                    ],
+                    onChanged: (val) {
+                      if (val != null) {
+                        setDialogState(() {
+                          selectedSchoolType = val;
+                          selectedClass =
+                              selectedSchoolType == 'Szkoła podstawowa'
+                              ? primaryClasses.first
+                              : highClasses.first;
+                        });
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Klasa:',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
+                  const SizedBox(height: 6),
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedClass,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                    ),
+                    items: currentClassesList
+                        .map(
+                          (cls) =>
+                              DropdownMenuItem(value: cls, child: Text(cls)),
+                        )
+                        .toList(),
+                    onChanged: (val) {
+                      if (val != null) {
+                        setDialogState(() {
+                          selectedClass = val;
+                        });
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 20),
+                  const Text(
+                    'Zainteresowania (wybierz lub dopisz własne):',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8.0,
+                    runSpacing: 4.0,
+                    children: availableInterests.map((interest) {
+                      final isSelected = selectedInterests.contains(interest);
+
+                      return FilterChip(
+                        label: Text(interest),
+                        selected: isSelected,
+                        selectedColor: const Color(0xFFE2F0EC),
+                        checkmarkColor: const Color(0xFF2A6B52),
+                        labelStyle: TextStyle(
+                          color: isSelected
+                              ? const Color(0xFF2A6B52)
+                              : Colors.black87,
+                          fontWeight: isSelected
+                              ? FontWeight.bold
+                              : FontWeight.normal,
+                          fontSize: 12,
                         ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      profile.name,
-                      style: const TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black87,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      profile.statusClass,
-                      style: const TextStyle(
-                        color: Colors.black54,
-                        fontSize: 14,
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(10),
-                      child: LinearProgressIndicator(
-                        value: profile.overallProgress / 100.0,
-                        minHeight: 12,
-                        backgroundColor: Colors.grey.shade200,
-                        color: const Color(0xFF52C41A),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Ogólny postęp zadań: ${profile.overallProgress.toStringAsFixed(0)}%',
-                      style: const TextStyle(
-                        color: Colors.black54,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    const SizedBox(height: 28),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 46,
-                      child: OutlinedButton(
-                        style: OutlinedButton.styleFrom(
-                          side: BorderSide(color: Colors.grey.shade300),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(24),
-                          ),
-                        ),
-                        onPressed: () {
-                          setState(() {
-                            _selectedNavIndex = 1;
+                        onSelected: (bool selected) {
+                          setDialogState(() {
+                            if (selected) {
+                              selectedInterests.add(interest);
+                            } else {
+                              selectedInterests.remove(interest);
+                            }
                           });
                         },
-                        child: const Text(
-                          'Zarządzaj planem lekcji',
-                          style: TextStyle(
-                            color: Colors.black87,
-                            fontWeight: FontWeight.bold,
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: customInterestController,
+                          decoration: const InputDecoration(
+                            labelText: 'Wpisz inne zainteresowanie...',
+                            border: OutlineInputBorder(),
+                            isDense: true,
                           ),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 46,
-                      child: OutlinedButton(
-                        style: OutlinedButton.styleFrom(
-                          side: BorderSide(color: Colors.grey.shade300),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(24),
-                          ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF2A6B52),
+                          foregroundColor: Colors.white,
                         ),
-                        onPressed: () => _showTextbookSelectorModal(profile),
-                        child: const Text(
-                          'Wybierz podręczniki',
-                          style: TextStyle(
-                            color: Colors.black87,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+                        onPressed: () {
+                          final customVal = customInterestController.text
+                              .trim();
 
-  Widget _buildScheduleContent(ChildProfileEntity profile) {
-    return Padding(
-      padding: const EdgeInsets.all(28.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'Harmonogram tygodniowy dla: ${profile.name}',
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black87,
+                          if (customVal.isEmpty) return;
+
+                          if (!ContentFilter.isSafe(customVal)) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'To słowo zawiera niedozwolone treści!',
+                                ),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                            return;
+                          }
+
+                          if (!availableInterests.contains(customVal)) {
+                            setDialogState(() {
+                              availableInterests.add(customVal);
+                              selectedInterests.add(customVal);
+                              customInterestController.clear();
+                            });
+                          }
+                        },
+                        child: const Text('Dodaj'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text(
+                  'Anuluj',
+                  style: TextStyle(color: Colors.grey),
                 ),
               ),
-              ElevatedButton.icon(
+              ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF2A6B52),
                   foregroundColor: Colors.white,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
                 ),
-                onPressed: () => _showEditScheduleDayDialog(profile, null),
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('Dodaj lekcje'),
+                onPressed: () async {
+                  if (nameController.text.trim().isNotEmpty) {
+                    final updatedChild = ChildProfileEntity(
+                      id: child.id,
+                      parentId: child.parentId,
+                      name: nameController.text.trim(),
+                      schoolType: selectedSchoolType,
+                      statusClass: selectedClass,
+                      motivationType: child.motivationType,
+                      interests: selectedInterests.isNotEmpty
+                          ? selectedInterests
+                          : ['Ogólne'],
+                      weeklySchedule: child.weeklySchedule,
+                      subjectsConfig: child.subjectsConfig,
+                    );
+
+                    await _saveChildToFirestore(updatedChild);
+
+                    // Poprawka: sprawdzamy oba konteksty po await.
+                    if (!mounted || !context.mounted) return;
+
+                    Navigator.pop(context);
+
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Zaktualizowano profil dziecka!'),
+                      ),
+                    );
+
+                    setState(() {});
+                  }
+                },
+                child: const Text('Zapisz zmiany'),
               ),
             ],
-          ),
-          const SizedBox(height: 16),
-          Expanded(
-            child: ListView.builder(
-              itemCount: dayNamesMap.length,
-              itemBuilder: (context, index) {
-                int dayKey = index + 1;
-                String dayName = dayNamesMap[dayKey]!;
-                List<String> subjects = profile.weeklySchedule[dayKey] ?? [];
+          );
+        },
+      ),
+    );
+  }
 
-                return Container(
-                  margin: const EdgeInsets.only(bottom: 10),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 12,
+  // Okno dodawania sprawdzianu
+  void _showAddExamDialog(ChildProfileEntity activeChild) {
+    TextEditingController titleController = TextEditingController();
+    TextEditingController dateController = TextEditingController();
+    TextEditingController scopeController = TextEditingController();
+
+    String selectedSubject = SchoolSubjects.getForSchoolType(
+      activeChild.schoolType,
+    ).first;
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final subjectsList = SchoolSubjects.getForSchoolType(
+            activeChild.schoolType,
+          );
+
+          if (!subjectsList.contains(selectedSubject)) {
+            selectedSubject = subjectsList.first;
+          }
+
+          return AlertDialog(
+            title: Text('Zaplanuj sprawdzian dla: ${activeChild.name}'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'Przedmiot:',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                   ),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.grey.shade200),
+                  const SizedBox(height: 6),
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedSubject,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                    ),
+                    items: subjectsList
+                        .map(
+                          (sub) =>
+                              DropdownMenuItem(value: sub, child: Text(sub)),
+                        )
+                        .toList(),
+                    onChanged: (val) {
+                      if (val != null) {
+                        setDialogState(() {
+                          selectedSubject = val;
+                        });
+                      }
+                    },
                   ),
-                  child: Row(
-                    children: [
-                      SizedBox(
-                        width: 110,
-                        child: Text(
-                          dayName,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: Colors.black87,
-                          ),
-                        ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: titleController,
+                    decoration: const InputDecoration(
+                      labelText: 'Tytuł / Temat (np. Kartkówka z ułamków)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: dateController,
+                    decoration: const InputDecoration(
+                      labelText: 'Data (np. 15.06.2026)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: scopeController,
+                    decoration: const InputDecoration(
+                      labelText: 'Zakres materiału',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text(
+                  'Anuluj',
+                  style: TextStyle(color: Colors.grey),
+                ),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2A6B52),
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () async {
+                  if (titleController.text.trim().isNotEmpty) {
+                    final newExam = ExamEntity(
+                      id: DateTime.now().millisecondsSinceEpoch.toString(),
+                      childId: activeChild.id,
+                      subject: selectedSubject,
+                      title: titleController.text.trim(),
+                      date: dateController.text.trim().isNotEmpty
+                          ? dateController.text.trim()
+                          : 'Najbliższy termin',
+                      scope: scopeController.text.trim(),
+                    );
+
+                    await _saveExamToFirestore(newExam);
+
+                    // Poprawka: sprawdzamy oba konteksty po await.
+                    if (!mounted || !context.mounted) return;
+
+                    Navigator.pop(context);
+
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Dodano sprawdzian do bazy danych!'),
                       ),
-                      Expanded(
-                        child: Text(
-                          subjects.isEmpty
-                              ? 'Brak zajęć w tym dniu'
-                              : subjects.join(' • '),
-                          style: TextStyle(
-                            color: subjects.isEmpty
-                                ? Colors.grey.shade400
-                                : Colors.black54,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(
-                          Icons.edit_outlined,
-                          size: 18,
-                          color: Color(0xFF2A6B52),
-                        ),
-                        onPressed: () =>
-                            _showEditScheduleDayDialog(profile, dayKey),
-                      ),
-                    ],
+                    );
+
+                    setState(() {});
+                  }
+                },
+                child: const Text('Zapisz sprawdzian'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _showChangePinDialog() {
+    TextEditingController oldPinController = TextEditingController();
+    TextEditingController newPinController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Zmień kod PIN Panelu Rodzica'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: oldPinController,
+              obscureText: true,
+              maxLength: 4,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Stary PIN',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: newPinController,
+              obscureText: true,
+              maxLength: 4,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Nowy 4-cyfrowy PIN',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Anuluj', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF2A6B52),
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () {
+              if (oldPinController.text == ParentAccount.pin &&
+                  newPinController.text.length == 4) {
+                ParentAccount.pin = newPinController.text;
+
+                Navigator.pop(context);
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Kod PIN został pomyślnie zmieniony!'),
                   ),
                 );
-              },
-            ),
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Błąd! Sprawdź stary PIN lub upewnij się, że nowy ma 4 cyfry.',
+                    ),
+                  ),
+                );
+              }
+            },
+            child: const Text('Zapisz'),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildProgressContent(ChildProfileEntity profile) {
-    return Padding(
-      padding: const EdgeInsets.all(28.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Postępy w rozwiązanych zadaniach: ${profile.name}',
-            style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: Colors.black87,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Expanded(
-            child: ListView(
-              children: profile.subjectsConfig.values.map((subj) {
-                return Container(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.grey.shade200),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            subj.subjectName,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Colors.black87,
-                            ),
-                          ),
-                          Text(
-                            '${subj.completedTasks} / ${subj.totalTasks} zadań (${subj.progressPercentage.toStringAsFixed(0)}%)',
-                            style: const TextStyle(
-                              color: Color(0xFF2A6B52),
-                              fontWeight: FontWeight.bold,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(6),
-                        child: LinearProgressIndicator(
-                          value: subj.progressPercentage / 100.0,
-                          minHeight: 8,
-                          backgroundColor: Colors.grey.shade100,
-                          color: const Color(0xFF2A6B52),
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Podręcznik: ${subj.selectedTextbook}',
-                        style: const TextStyle(
-                          color: Colors.black45,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              }).toList(),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  // Baner powiadamiający o nowej wersji aplikacji z GitHuba
+  Widget _buildUpdateBannerIfAvailable() {
+    if (!globalUpdateAvailable) {
+      return const SizedBox.shrink();
+    }
 
-  Widget _buildAppControlContent(ChildProfileEntity profile) {
-    return Padding(
-      padding: const EdgeInsets.all(28.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16.0),
+      padding: const EdgeInsets.all(12.0),
+      decoration: BoxDecoration(
+        color: const Color(0xFFE2F0EC),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF2A6B52), width: 1.5),
+      ),
+      child: Row(
         children: [
-          Text(
-            'Blokady i zasady korzystania z komputera dla: ${profile.name}',
-            style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: Colors.black87,
-            ),
-          ),
-          const SizedBox(height: 16),
+          const Icon(Icons.system_update, color: Color(0xFF2A6B52), size: 28),
+          const SizedBox(width: 12),
           Expanded(
-            child: ListView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildControlTile(
-                  title: 'Godzina wieczorna (Blokada nocna)',
-                  subtitle: 'Automatyczna blokada urządzenia o godzinie 20:00',
-                  icon: Icons.nightlight_round,
-                  value: true,
+                Text(
+                  'Dostępna nowa wersja: $globalLatestVersion!',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF2A6B52),
+                    fontSize: 14,
+                  ),
                 ),
-                _buildControlTile(
-                  title: 'Przerwy na odpoczynek',
-                  subtitle:
-                      '15 minut wymuszonej przerwy po każdej godzinie grania',
-                  icon: Icons.timer,
-                  value: true,
-                ),
-                _buildControlTile(
-                  title: 'Ścisła blokada startowa',
-                  subtitle:
-                      'Wymagaj rozwiązania zadań przy każdym uruchomieniu',
-                  icon: Icons.lock,
-                  value: true,
+                const Text(
+                  'Pobierz najnowszą wersję z zakładki Releases na GitHubie.',
+                  style: TextStyle(fontSize: 12, color: Colors.black87),
                 ),
               ],
             ),
           ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF2A6B52),
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () {
+              showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('Aktualizuj EduShield'),
+                  content: Text(
+                    'Przejdź do swojego konta GitHub w zakładce Releases, '
+                    'aby pobrać nowy plik instalacyjny dla wersji '
+                    '($globalLatestVersion).',
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('OK'),
+                    ),
+                  ],
+                ),
+              );
+            },
+            child: const Text('Sprawdź'),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildControlTile({
-    required String title,
-    required String subtitle,
-    required IconData icon,
-    required bool value,
-  }) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade200),
-      ),
-      child: SwitchListTile(
-        secondary: Icon(icon, color: const Color(0xFF2A6B52)),
-        title: Text(
-          title,
-          style: const TextStyle(
-            fontWeight: FontWeight.bold,
-            fontSize: 14,
-            color: Colors.black87,
+  @override
+  Widget build(BuildContext context) {
+    if (!_isAuthorized) {
+      return Scaffold(
+        backgroundColor: const Color(0xFFF3F6F8),
+        body: Center(
+          child: SingleChildScrollView(
+            child: Container(
+              width: 400,
+              padding: const EdgeInsets.all(28.0),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.08),
+                    blurRadius: 15,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.lock, color: Color(0xFF2A6B52), size: 24),
+                      SizedBox(width: 8),
+                      Text(
+                        'Panel Rodzica - Autoryzacja',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Wpisz 4-cyfrowy kod PIN, aby uzyskać dostęp:',
+                    style: TextStyle(fontSize: 13, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 20),
+                  TextField(
+                    controller: _pinController,
+                    obscureText: true,
+                    keyboardType: TextInputType.number,
+                    maxLength: 4,
+                    decoration: const InputDecoration(
+                      labelText: 'Kod PIN',
+                      border: OutlineInputBorder(),
+                    ),
+                    onSubmitted: (_) => _verifyMasterPin(),
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2A6B52),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.all(14),
+                    ),
+                    onPressed: _verifyMasterPin,
+                    child: const Text(
+                      'Potwierdź PIN',
+                      style: TextStyle(fontSize: 15),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
-        subtitle: Text(
-          subtitle,
-          style: const TextStyle(fontSize: 12, color: Colors.black54),
-        ),
-        value: value,
-        thumbColor: WidgetStateProperty.resolveWith<Color>((states) {
-          if (states.contains(WidgetState.selected)) {
-            return const Color(0xFF2A6B52);
-          }
-          return Colors.grey.shade400;
-        }),
-        trackColor: WidgetStateProperty.resolveWith<Color>((states) {
-          if (states.contains(WidgetState.selected)) {
-            return const Color(0xFF2A6B52).withValues(alpha: 0.3);
-          }
-          return Colors.grey.shade300;
-        }),
-        onChanged: (val) {},
-      ),
-    );
-  }
+      );
+    }
 
-  void _showEditScheduleDayDialog(ChildProfileEntity child, int? dayKey) {
-    int selectedDay = dayKey ?? 1;
-    List<String> currentSubjs = child.weeklySchedule[selectedDay] ?? [];
-    TextEditingController controller = TextEditingController(
-      text: currentSubjs.join(', '),
-    );
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('children')
+          .where('parentId', isEqualTo: _currentParentUid)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            backgroundColor: Color(0xFFF3F6F8),
+            body: Center(
+              child: CircularProgressIndicator(color: Color(0xFF2A6B52)),
+            ),
+          );
+        }
 
-    showDialog(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          backgroundColor: Colors.white,
-          title: Text(
-            'Edycja planu: ${dayNamesMap[selectedDay]}',
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
+        final myChildrenList = snapshot.hasData
+            ? snapshot.data!.docs
+                  .map(
+                    (doc) => ChildProfileEntity.fromMap(
+                      doc.data() as Map<String, dynamic>,
+                    ),
+                  )
+                  .toList()
+            : <ChildProfileEntity>[];
+
+        return Scaffold(
+          backgroundColor: const Color(0xFFF3F6F8),
+          body: Row(
             children: [
-              TextField(
-                controller: controller,
-                decoration: const InputDecoration(
-                  labelText: 'Przedmioty (oddzielone przecinkami)',
-                  border: OutlineInputBorder(),
+              Container(
+                width: 220,
+                color: Colors.white,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.all(20.0),
+                      child: Row(
+                        children: [
+                          Icon(Icons.shield, color: Color(0xFF2A6B52)),
+                          SizedBox(width: 8),
+                          Text(
+                            'EduShield',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF2A6B52),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF2A6B52),
+                          foregroundColor: Colors.white,
+                          minimumSize: const Size.fromHeight(40),
+                        ),
+                        onPressed: _showAddChildDialog,
+                        icon: const Icon(Icons.add, size: 16),
+                        label: const Text('Dodaj dziecko'),
+                      ),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.dashboard_outlined),
+                      title: const Text('Pulpit'),
+                      selected: _selectedNavIndex == 0,
+                      selectedColor: const Color(0xFF2A6B52),
+                      onTap: () => setState(() => _selectedNavIndex = 0),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.calendar_today_outlined),
+                      title: const Text('Plan lekcji'),
+                      selected: _selectedNavIndex == 1,
+                      selectedColor: const Color(0xFF2A6B52),
+                      onTap: () => setState(() => _selectedNavIndex = 1),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.assignment_outlined),
+                      title: const Text('Sprawdziany'),
+                      selected: _selectedNavIndex == 2,
+                      selectedColor: const Color(0xFF2A6B52),
+                      onTap: () => setState(() => _selectedNavIndex = 2),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.security_outlined),
+                      title: const Text('Kontrola aplikacji'),
+                      selected: _selectedNavIndex == 3,
+                      selectedColor: const Color(0xFF2A6B52),
+                      onTap: () => setState(() => _selectedNavIndex = 3),
+                    ),
+                    const Spacer(),
+                    const Divider(height: 1),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: 16.0,
+                        vertical: 8.0,
+                      ),
+                      child: Text(
+                        'Wersja: 1.0.0',
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.vpn_key, color: Colors.grey),
+                      title: const Text(
+                        'Zmień PIN',
+                        style: TextStyle(fontSize: 14),
+                      ),
+                      onTap: _showChangePinDialog,
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.logout, color: Colors.orange),
+                      title: const Text(
+                        'Wyloguj',
+                        style: TextStyle(fontSize: 14, color: Colors.orange),
+                      ),
+                      onTap: _logout,
+                    ),
+                    ListTile(
+                      leading: const Icon(
+                        Icons.exit_to_app,
+                        color: Colors.redAccent,
+                      ),
+                      title: const Text(
+                        'Tryb dziecka',
+                        style: TextStyle(fontSize: 14, color: Colors.redAccent),
+                      ),
+                      onTap: () => _returnToChildLock(myChildrenList),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Column(
+                  children: [
+                    Container(
+                      height: 60,
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      color: Colors.white,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            _selectedNavIndex == 0
+                                ? 'Pulpit Rodzica'
+                                : _selectedNavIndex == 1
+                                ? 'Zarządzanie Planem Lekcji'
+                                : _selectedNavIndex == 2
+                                ? 'Zarządzanie Sprawdzianami'
+                                : 'Kontrola Aplikacji',
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black87,
+                            ),
+                          ),
+                          Row(
+                            children: [
+                              const Icon(
+                                Icons.account_circle,
+                                color: Color(0xFF2A6B52),
+                              ),
+                              const SizedBox(width: 8),
+                              myChildrenList.isNotEmpty
+                                  ? DropdownButton<int>(
+                                      value:
+                                          _activeChildIndex <
+                                              myChildrenList.length
+                                          ? _activeChildIndex
+                                          : 0,
+                                      underline: const SizedBox(),
+                                      items: List.generate(
+                                        myChildrenList.length,
+                                        (index) => DropdownMenuItem(
+                                          value: index,
+                                          child: Text(
+                                            myChildrenList[index].name,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      onChanged: (newIndex) {
+                                        if (newIndex != null) {
+                                          setState(() {
+                                            _activeChildIndex = newIndex;
+                                          });
+                                        }
+                                      },
+                                    )
+                                  : const Text(
+                                      'Brak dzieci',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24.0),
+                        child: Column(
+                          children: [
+                            _buildUpdateBannerIfAvailable(),
+                            Expanded(
+                              child: _selectedNavIndex == 0
+                                  ? _buildPulpitContent(myChildrenList)
+                                  : _selectedNavIndex == 1
+                                  ? _buildScheduleContent(myChildrenList)
+                                  : _selectedNavIndex == 2
+                                  ? _buildExamsContent(myChildrenList)
+                                  : const Center(
+                                      child: Text(
+                                        'Ustawienia kontroli aplikacji '
+                                        'i limitów czasowych',
+                                        style: TextStyle(
+                                          fontSize: 18,
+                                          color: Colors.grey,
+                                        ),
+                                      ),
+                                    ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Anuluj'),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF2A6B52),
-                foregroundColor: Colors.white,
-              ),
-              onPressed: () {
-                List<String> updated = controller.text
-                    .split(',')
-                    .map((e) => e.trim())
-                    .where((e) => e.isNotEmpty)
-                    .toList();
-                setState(() {
-                  child.weeklySchedule[selectedDay] = updated;
-                  child.syncSubjectsFromSchedule();
-                });
-                Navigator.pop(dialogContext);
-              },
-              child: const Text('Zapisz'),
-            ),
-          ],
         );
       },
     );
   }
 
-  void _showTextbookSelectorModal(ChildProfileEntity profile) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (dialogContext) {
-        return Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              Text(
-                '📚 Wybór podręczników dla: ${profile.name}',
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
+  Widget _buildPulpitContent(List<ChildProfileEntity> myChildrenList) {
+    if (myChildrenList.isEmpty) {
+      return Center(
+        child: Container(
+          width: 450,
+          padding: const EdgeInsets.all(32),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.04),
+                blurRadius: 10,
+                offset: const Offset(0, 2),
               ),
-              const SizedBox(height: 16),
-              ...profile.subjectsConfig.values.map((subj) {
-                String safeValue =
-                    availableTextbooks.contains(subj.selectedTextbook)
-                    ? subj.selectedTextbook
-                    : availableTextbooks[0];
-
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 12.0),
-                  child: DropdownButtonFormField<String>(
-                    // ignore: deprecated_member_use
-                    value: safeValue,
-                    decoration: InputDecoration(
-                      labelText: subj.subjectName,
-                      border: const OutlineInputBorder(),
-                    ),
-                    items: availableTextbooks
-                        .map(
-                          (book) => DropdownMenuItem(
-                            value: book,
-                            child: Text(
-                              book,
-                              style: const TextStyle(fontSize: 13),
-                            ),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (val) {
-                      if (val != null) {
-                        setState(() {
-                          subj.selectedTextbook = val;
-                        });
-                      }
-                    },
-                  ),
-                );
-              }),
             ],
           ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.child_care, size: 64, color: Color(0xFF2A6B52)),
+              const SizedBox(height: 16),
+              const Text(
+                'Brak przypisanych dzieci',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Twoje konto nie ma jeszcze przypisanych dzieci. '
+                'Dodaj swoje pierwsze dziecko.',
+                style: TextStyle(fontSize: 13, color: Colors.grey),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2A6B52),
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size.fromHeight(48),
+                ),
+                onPressed: _showAddChildDialog,
+                icon: const Icon(Icons.add),
+                label: const Text(
+                  'Dodaj dziecko',
+                  style: TextStyle(fontSize: 15),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_activeChildIndex >= myChildrenList.length) {
+      _activeChildIndex = 0;
+    }
+
+    final activeChild = myChildrenList[_activeChildIndex];
+
+    return ListView(
+      children: [
+        Center(
+          child: Container(
+            width: 550,
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.04),
+                  blurRadius: 10,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Column(
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.edit, color: Color(0xFF2A6B52)),
+                      tooltip: 'Edytuj profil dziecka',
+                      onPressed: () => _showEditChildDialog(activeChild),
+                    ),
+                  ],
+                ),
+                const CircleAvatar(
+                  radius: 36,
+                  backgroundColor: Color(0xFFE2F0EC),
+                  child: Icon(Icons.person, size: 40, color: Color(0xFF2A6B52)),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  activeChild.name,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE2F0EC),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    '${activeChild.schoolType} • ${activeChild.statusClass}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF2A6B52),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Zainteresowania (Personalizacja zadań):',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 6,
+                  children: activeChild.interests
+                      .map(
+                        (interest) => Chip(
+                          backgroundColor: const Color(0xFFF3F6F8),
+                          label: Text(
+                            interest,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Color(0xFF2A6B52),
+                            ),
+                          ),
+                        ),
+                      )
+                      .toList(),
+                ),
+                const SizedBox(height: 20),
+                LinearProgressIndicator(
+                  value: 0.0,
+                  backgroundColor: Colors.grey[200],
+                  color: const Color(0xFF2A6B52),
+                  minHeight: 6,
+                  borderRadius: BorderRadius.circular(3),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Ogólny postęp zadań: 0%',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2A6B52),
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size.fromHeight(44),
+                  ),
+                  onPressed: () => _returnToChildLock(myChildrenList),
+                  child: Text(
+                    'Przejdź do trybu dziecka dla: ${activeChild.name}',
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // --- ZAKŁADKA PLANU LEKCJI ---
+  Widget _buildScheduleContent(List<ChildProfileEntity> myChildrenList) {
+    if (myChildrenList.isEmpty) {
+      return const Center(
+        child: Text('Najpierw dodaj dziecko, aby zarządzać planem lekcji.'),
+      );
+    }
+
+    if (_activeChildIndex >= myChildrenList.length) {
+      _activeChildIndex = 0;
+    }
+
+    final activeChild = myChildrenList[_activeChildIndex];
+
+    final availableSubjects = SchoolSubjects.getForSchoolType(
+      activeChild.schoolType,
+    );
+
+    final dayScheduleMap = Map<String, dynamic>.from(
+      activeChild.weeklySchedule[_selectedDay] ?? {'subjects': <String>[]},
+    );
+
+    final List<String> currentDaySubjects = List<String>.from(
+      dayScheduleMap['subjects'] ?? [],
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: _daysOfWeek.map((day) {
+              bool isSelected = day == _selectedDay;
+
+              return Padding(
+                padding: const EdgeInsets.only(right: 8.0),
+                child: ChoiceChip(
+                  label: Text(day),
+                  selected: isSelected,
+                  selectedColor: const Color(0xFF2A6B52),
+                  labelStyle: TextStyle(
+                    color: isSelected ? Colors.white : Colors.black87,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  onSelected: (selected) {
+                    if (selected) {
+                      setState(() {
+                        _selectedDay = day;
+                      });
+                    }
+                  },
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+        const SizedBox(height: 20),
+        Expanded(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                flex: 3,
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.04),
+                        blurRadius: 10,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Plan na: $_selectedDay (${activeChild.name})',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const Divider(),
+                      Expanded(
+                        child: currentDaySubjects.isEmpty
+                            ? const Center(
+                                child: Text(
+                                  'Brak przedmiotów w planie.',
+                                  style: TextStyle(color: Colors.grey),
+                                ),
+                              )
+                            : ListView.builder(
+                                itemCount: currentDaySubjects.length,
+                                itemBuilder: (context, index) {
+                                  final subject = currentDaySubjects[index];
+
+                                  return ListTile(
+                                    leading: CircleAvatar(
+                                      backgroundColor: const Color(0xFFE2F0EC),
+                                      child: Text(
+                                        '${index + 1}',
+                                        style: const TextStyle(
+                                          color: Color(0xFF2A6B52),
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                    title: Text(subject),
+                                    trailing: IconButton(
+                                      icon: const Icon(
+                                        Icons.delete,
+                                        color: Colors.redAccent,
+                                      ),
+                                      onPressed: () async {
+                                        currentDaySubjects.removeAt(index);
+
+                                        Map<String, dynamic> updatedSchedule =
+                                            Map.from(
+                                              activeChild.weeklySchedule,
+                                            );
+
+                                        updatedSchedule[_selectedDay] = {
+                                          'subjects': currentDaySubjects,
+                                        };
+
+                                        final updatedChild = ChildProfileEntity(
+                                          id: activeChild.id,
+                                          parentId: activeChild.parentId,
+                                          name: activeChild.name,
+                                          schoolType: activeChild.schoolType,
+                                          statusClass: activeChild.statusClass,
+                                          motivationType:
+                                              activeChild.motivationType,
+                                          interests: activeChild.interests,
+                                          weeklySchedule: updatedSchedule,
+                                          subjectsConfig:
+                                              activeChild.subjectsConfig,
+                                        );
+
+                                        await _saveChildToFirestore(
+                                          updatedChild,
+                                        );
+                                      },
+                                    ),
+                                  );
+                                },
+                              ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                flex: 2,
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.04),
+                        blurRadius: 10,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Dostępne (${activeChild.schoolType})',
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const Divider(),
+                      Expanded(
+                        child: ListView.builder(
+                          itemCount: availableSubjects.length,
+                          itemBuilder: (context, index) {
+                            final subject = availableSubjects[index];
+
+                            return Card(
+                              elevation: 0,
+                              color: const Color(0xFFF3F6F8),
+                              child: ListTile(
+                                dense: true,
+                                title: Text(
+                                  subject,
+                                  style: const TextStyle(fontSize: 13),
+                                ),
+                                trailing: const Icon(
+                                  Icons.add_circle,
+                                  color: Color(0xFF2A6B52),
+                                  size: 20,
+                                ),
+                                onTap: () async {
+                                  currentDaySubjects.add(subject);
+
+                                  Map<String, dynamic> updatedSchedule =
+                                      Map.from(activeChild.weeklySchedule);
+
+                                  updatedSchedule[_selectedDay] = {
+                                    'subjects': currentDaySubjects,
+                                  };
+
+                                  final updatedChild = ChildProfileEntity(
+                                    id: activeChild.id,
+                                    parentId: activeChild.parentId,
+                                    name: activeChild.name,
+                                    schoolType: activeChild.schoolType,
+                                    statusClass: activeChild.statusClass,
+                                    motivationType: activeChild.motivationType,
+                                    interests: activeChild.interests,
+                                    weeklySchedule: updatedSchedule,
+                                    subjectsConfig: activeChild.subjectsConfig,
+                                  );
+
+                                  await _saveChildToFirestore(updatedChild);
+                                },
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // --- ZAKŁADKA SPRAWDZIANÓW Z SYNCHRONIZACJĄ Z FIRESTORE ---
+  Widget _buildExamsContent(List<ChildProfileEntity> myChildrenList) {
+    if (myChildrenList.isEmpty) {
+      return const Center(
+        child: Text('Najpierw dodaj dziecko, aby zarządzać sprawdzianami.'),
+      );
+    }
+
+    if (_activeChildIndex >= myChildrenList.length) {
+      _activeChildIndex = 0;
+    }
+
+    final activeChild = myChildrenList[_activeChildIndex];
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('exams')
+          .where('childId', isEqualTo: activeChild.id)
+          .snapshots(),
+      builder: (context, snapshot) {
+        final examsList = snapshot.hasData
+            ? snapshot.data!.docs
+                  .map(
+                    (doc) =>
+                        ExamEntity.fromMap(doc.data() as Map<String, dynamic>),
+                  )
+                  .toList()
+            : <ExamEntity>[];
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Zaplanowane sprawdziany dla: ${activeChild.name}',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2A6B52),
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: () => _showAddExamDialog(activeChild),
+                  icon: const Icon(Icons.add, size: 16),
+                  label: const Text('Dodaj sprawdzian'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: examsList.isEmpty
+                  ? Center(
+                      child: Text(
+                        'Brak zaplanowanych sprawdzianów dla '
+                        '${activeChild.name}.\n'
+                        'Kliknij przycisk powyżej, aby dodać nowy.',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: Colors.grey),
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: examsList.length,
+                      itemBuilder: (context, index) {
+                        final exam = examsList[index];
+
+                        return Card(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: ListTile(
+                            leading: const CircleAvatar(
+                              backgroundColor: Color(0xFFE2F0EC),
+                              child: Icon(
+                                Icons.assignment,
+                                color: Color(0xFF2A6B52),
+                              ),
+                            ),
+                            title: Text(
+                              exam.title,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            subtitle: Text(
+                              'Przedmiot: ${exam.subject} | Data: ${exam.date}\n'
+                              'Zakres: ${exam.scope}',
+                            ),
+                            isThreeLine: true,
+                            trailing: IconButton(
+                              icon: const Icon(
+                                Icons.delete,
+                                color: Colors.redAccent,
+                              ),
+                              onPressed: () async {
+                                await FirebaseFirestore.instance
+                                    .collection('exams')
+                                    .doc(exam.id)
+                                    .delete();
+                              },
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
         );
       },
     );

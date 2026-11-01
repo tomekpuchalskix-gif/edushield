@@ -1,75 +1,147 @@
-enum MotivationType { gamer, explorer, observer }
+// ignore_for_file: unnecessary_import
 
-class SubjectConfiguration {
-  final String subjectName;
-  String selectedTextbook;
-  int currentBookPage;
-  int completedTasks;
-  int totalTasks;
+class ParentAccount {
+  static String pin = '1234';
+}
 
-  SubjectConfiguration({
-    required this.subjectName,
-    required this.selectedTextbook,
-    this.currentBookPage = 1,
-    this.completedTasks = 0,
-    this.totalTasks = 20,
-  });
+enum MotivationType { explorer, achiever }
 
-  double get progressPercentage =>
-      totalTasks == 0 ? 0 : (completedTasks / totalTasks) * 100;
+class SchoolSubjects {
+  // Pełna, zaktualizowana lista przedmiotów dla Szkoły Podstawowej (z rozdzieloną plastyką i muzyką)
+  static const List<String> primarySchool = [
+    'Język polski',
+    'Matematyka',
+    'Język angielski',
+    'Geografia',
+    'Biologia',
+    'Historia',
+    'Informatyka',
+    'Plastyka',
+    'Muzyka',
+    'Technika',
+    'Edukacja zdrowotna',
+    'Religia',
+    'Wychowanie fizyczne',
+    'Godzina wychowawcza',
+  ];
+
+  // Lista przedmiotów dla Szkoły Średniej / Technikum
+  static const List<String> highSchool = [
+    'Język polski',
+    'Matematyka',
+    'Język angielski',
+    'Język obcy drugi (np. niemiecki)',
+    'Przedmioty zawodowe / techniczne',
+    'Fizyka',
+    'Chemia',
+    'Biologia',
+    'Geografia',
+    'Historia',
+    'WOS',
+    'Informatyka',
+    'Wychowanie fizyczne',
+  ];
+
+  static List<String> getForSchoolType(String schoolType) {
+    if (schoolType.contains('podstawowa')) {
+      return primarySchool;
+    } else {
+      return highSchool;
+    }
+  }
 }
 
 class ChildProfileEntity {
   final String id;
+  final String? parentId;
   final String name;
+  final String schoolType;
   final String statusClass;
   final MotivationType motivationType;
-  List<String> interests;
-  Map<int, List<String>> weeklySchedule;
-  String? schedulePhotoUrl;
-  Map<String, SubjectConfiguration> subjectsConfig;
+  final List<String>
+  interests; // Zainteresowania dziecka (np. do personalizacji zadań)
+  final Map<String, dynamic> weeklySchedule;
+  final Map<String, dynamic> subjectsConfig;
 
   ChildProfileEntity({
     required this.id,
+    this.parentId,
     required this.name,
+    required this.schoolType,
     required this.statusClass,
     required this.motivationType,
     required this.interests,
     required this.weeklySchedule,
-    this.schedulePhotoUrl,
     required this.subjectsConfig,
-  }) {
-    syncSubjectsFromSchedule();
+  });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'parentId': parentId,
+      'name': name,
+      'schoolType': schoolType,
+      'statusClass': statusClass,
+      'motivationType': motivationType.index,
+      'interests': interests,
+      'weeklySchedule': weeklySchedule,
+      'subjectsConfig': subjectsConfig,
+    };
   }
 
-  void syncSubjectsFromSchedule() {
-    Set<String> scheduleSubjects = {};
-    for (var daySubjects in weeklySchedule.values) {
-      scheduleSubjects.addAll(daySubjects);
-    }
+  factory ChildProfileEntity.fromMap(Map<String, dynamic> map) {
+    return ChildProfileEntity(
+      id: map['id'] ?? '',
+      parentId: map['parentId'],
+      name: map['name'] ?? '',
+      schoolType: map['schoolType'] ?? 'Szkoła podstawowa',
+      statusClass: map['statusClass'] ?? 'Klasa 5 SP',
+      motivationType: MotivationType.values[map['motivationType'] ?? 0],
+      interests: List<String>.from(map['interests'] ?? []),
+      weeklySchedule: Map<String, dynamic>.from(map['weeklySchedule'] ?? {}),
+      subjectsConfig: Map<String, dynamic>.from(map['subjectsConfig'] ?? {}),
+    );
+  }
+}
 
-    for (String subject in scheduleSubjects) {
-      if (!subjectsConfig.containsKey(subject)) {
-        subjectsConfig[subject] = SubjectConfiguration(
-          subjectName: subject,
-          selectedTextbook: 'Standardowy Podręcznik MEN / Wbudowany',
-        );
-      }
-    }
+// Model sprawdzianu zapisywany w bazie
+class ExamEntity {
+  final String id;
+  final String childId;
+  final String subject;
+  final String title;
+  final String date;
+  final String scope; // Zakres materiału
+
+  ExamEntity({
+    required this.id,
+    required this.childId,
+    required this.subject,
+    required this.title,
+    required this.date,
+    required this.scope,
+  });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'childId': childId,
+      'subject': subject,
+      'title': title,
+      'date': date,
+      'scope': scope,
+    };
   }
 
-  double get overallProgress {
-    if (subjectsConfig.isEmpty) return 0.0;
-    double sum = subjectsConfig.values
-        .map((e) => e.progressPercentage)
-        .fold(0.0, (prev, element) => prev + element);
-    return sum / subjectsConfig.values.length;
-  }
-
-  List<String> getNextDaySubjects() {
-    int today = DateTime.now().weekday;
-    int nextDay = today == 7 ? 1 : today + 1;
-    return weeklySchedule[nextDay] ?? ['Matematyka', 'Język angielski'];
+  factory ExamEntity.fromMap(Map<String, dynamic> map) {
+    return ExamEntity(
+      id: map['id'] ?? '',
+      childId: map['childId'] ?? '',
+      subject: map['subject'] ?? '',
+      title: map['title'] ?? '',
+      date: map['date'] ?? '',
+      scope: map['scope'] ?? '',
+    );
   }
 }
 
@@ -93,52 +165,4 @@ class TaskEntity {
   });
 }
 
-List<ChildProfileEntity> globalProfiles = [
-  ChildProfileEntity(
-    id: 'mieszko',
-    name: 'Mieszko',
-    statusClass: 'Klasa 4 SP',
-    motivationType: MotivationType.gamer,
-    interests: ['Minecraft', 'Roblox', 'BMX', 'Rugby'],
-    weeklySchedule: {
-      1: ['Język polski', 'Matematyka', 'Historia'],
-      2: ['Matematyka', 'Przyroda', 'Język angielski'],
-      3: ['Język polski', 'Matematyka', 'W-F'],
-      4: ['Historia', 'Plastyka', 'Język angielski'],
-      5: ['Język polski', 'Przyroda', 'Informatyka'],
-      6: [],
-      7: ['Język polski', 'Matematyka', 'Historia'],
-    },
-    subjectsConfig: {
-      'Język angielski': SubjectConfiguration(
-          subjectName: 'Język angielski',
-          selectedTextbook: 'English Class (Pearson) - Poziom A1+',
-          completedTasks: 16,
-          totalTasks: 20),
-      'Matematyka': SubjectConfiguration(
-          subjectName: 'Matematyka',
-          selectedTextbook: 'Matematyka z plusem (GWO)',
-          completedTasks: 12,
-          totalTasks: 20),
-    },
-  ),
-];
-
-List<TaskEntity> globalTasks = [
-  TaskEntity(
-      id: 'E1',
-      childId: 'mieszko',
-      subject: 'Język angielski',
-      taskText: 'Ile lat ma Tom według tekstu? Wpisz liczbę słownie po angielsku.',
-      correctAnswer: 'twelve',
-      hint: 'To liczba o jeden większa niż 11.',
-      explanation: 'W tekście Tom mówi: "I\'m twelve years old" (mam 12 lat).'),
-  TaskEntity(
-      id: 'M1',
-      childId: 'mieszko',
-      subject: 'Matematyka',
-      taskText: 'Potrzebujesz 64 bloków drewna na budowę, a masz już 38. Ile bloków ci brakuje?',
-      correctAnswer: '26',
-      hint: 'Wykonaj odejmowanie: 64 - 38.',
-      explanation: '64 minus 38 daje 26 brakujących bloków.'),
-];
+List<ChildProfileEntity> globalProfiles = [];
