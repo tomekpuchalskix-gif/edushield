@@ -57,7 +57,7 @@ class _LockScreenWidgetState extends State<LockScreenWidget>
     super.dispose();
   }
 
-  // Uruchomienie aplikacji na całym ekranie.
+  // Uruchomienie blokady trybu dziecka.
   Future<void> _initWindowLock() async {
     await windowManager.setTitleBarStyle(TitleBarStyle.hidden);
     await windowManager.setAlwaysOnTop(true);
@@ -353,16 +353,22 @@ class _LockScreenWidgetState extends State<LockScreenWidget>
     );
   }
 
-  void _verifyPin(
+  // Przejście z trybu dziecka do panelu rodzica.
+  Future<void> _verifyPin(
     String enteredPin,
     BuildContext dialogContext,
     StateSetter setModalState,
     Function(bool) setError,
   ) async {
     if (enteredPin == ParentAccount.pin) {
+      // Przywrócenie standardowego okna Windows.
       await windowManager.setPreventClose(false);
       await windowManager.setAlwaysOnTop(false);
+      await windowManager.setTitleBarStyle(TitleBarStyle.normal);
       await windowManager.setFullScreen(false);
+      await windowManager.maximize();
+      await windowManager.show();
+      await windowManager.focus();
 
       if (!dialogContext.mounted) return;
 
@@ -372,7 +378,10 @@ class _LockScreenWidgetState extends State<LockScreenWidget>
 
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (context) => const ParentDashboardScreen()),
+        MaterialPageRoute(
+          builder: (context) =>
+              const ParentDashboardScreen(initialAuthorized: true),
+        ),
       );
     } else {
       setModalState(() {
@@ -419,13 +428,21 @@ class _LockScreenWidgetState extends State<LockScreenWidget>
             ],
           ),
         ),
-        IconButton(
-          tooltip: 'Panel rodzica',
+        ElevatedButton.icon(
           onPressed: _promptForParentPin,
-          icon: const Icon(
-            Icons.settings_rounded,
-            color: Color(0xFF9BAAC0),
-            size: 27,
+          icon: const Icon(Icons.admin_panel_settings, size: 19),
+          label: const Text(
+            'PANEL RODZICA',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF26364C),
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: const BorderSide(color: primaryColor, width: 1),
+            ),
           ),
         ),
         const SizedBox(width: 8),
