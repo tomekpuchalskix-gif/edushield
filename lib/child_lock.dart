@@ -130,6 +130,7 @@ class _LockScreenWidgetState extends State<LockScreenWidget>
     );
   }
 
+  // Pobieranie zadań z bazy.
   Future<void> _loadDailyTasks() async {
     try {
       final dailyMap = await DailyQuizManager.getDailyQuestionsPerSubject();
@@ -161,6 +162,15 @@ class _LockScreenWidgetState extends State<LockScreenWidget>
         tasks = loadedTasks;
         rawTasks = rawList;
         isLoading = false;
+
+        if (loadedTasks.isEmpty) {
+          feedbackMessage =
+              'Nie znaleziono aktywnych zadań. '
+              'Komputer pozostaje zablokowany. '
+              'Poproś rodzica o sprawdzenie aplikacji.';
+        } else {
+          feedbackMessage = '';
+        }
       });
 
       requestFocus();
@@ -169,9 +179,28 @@ class _LockScreenWidgetState extends State<LockScreenWidget>
 
       setState(() {
         isLoading = false;
-        feedbackMessage = 'Błąd ładowania zadań: $e';
+        feedbackMessage =
+            'Błąd ładowania zadań. Komputer pozostaje zablokowany. '
+            'Poproś rodzica o sprawdzenie aplikacji.';
       });
     }
+  }
+
+  // Ponowne pobranie zadań.
+  Future<void> _retryLoadDailyTasks() async {
+    if (isLoading) return;
+
+    setState(() {
+      isLoading = true;
+      feedbackMessage = '';
+      tasks = [];
+      rawTasks = [];
+      currentIndex = 0;
+      _answerController.clear();
+      _selectedDropdownAnswer = null;
+    });
+
+    await _loadDailyTasks();
   }
 
   void requestFocus() {
@@ -185,9 +214,14 @@ class _LockScreenWidgetState extends State<LockScreenWidget>
   Future<void> checkAnswer() async {
     if (isChecking) return;
 
+    // Brak zadań nigdy nie może odblokować komputera.
     if (tasks.isEmpty) {
-      await _saveUnlockForToday();
-      _goToFreeTime();
+      setState(() {
+        feedbackMessage =
+            'Brak zadań. Komputer pozostaje zablokowany. '
+            'Poproś rodzica o sprawdzenie aplikacji.';
+        isCorrectState = false;
+      });
       return;
     }
 
@@ -499,24 +533,30 @@ class _LockScreenWidgetState extends State<LockScreenWidget>
       return Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.menu_book_rounded, size: 64, color: primaryColor),
+          const Icon(
+            Icons.lock_outline_rounded,
+            size: 64,
+            color: Colors.orangeAccent,
+          ),
           const SizedBox(height: 20),
           Text(
             feedbackMessage.isNotEmpty
                 ? feedbackMessage
-                : 'Brak aktywnych zadań w bazie.',
+                : 'Brak dostępnych zadań. Komputer pozostaje zablokowany.',
             textAlign: TextAlign.center,
             style: const TextStyle(color: Colors.white, fontSize: 20),
           ),
           const SizedBox(height: 25),
-          if (!feedbackMessage.startsWith('Błąd'))
-            ElevatedButton(
-              onPressed: () async {
-                await _saveUnlockForToday();
-                _goToFreeTime();
-              },
-              child: const Text('Przejdź do czasu wolnego'),
+          ElevatedButton.icon(
+            onPressed: isLoading ? null : _retryLoadDailyTasks,
+            icon: const Icon(Icons.refresh),
+            label: const Text('SPRÓBUJ PONOWNIE'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: primaryColor,
+              foregroundColor: darkColor,
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
             ),
+          ),
         ],
       );
     }

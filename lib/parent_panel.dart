@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
+import 'package:window_manager/window_manager.dart';
 
 import 'dart:convert';
 
@@ -39,11 +40,33 @@ class _ParentDashboardScreenState extends State<ParentDashboardScreen> {
     'Piątek',
   ];
 
+  // Konfiguracja okna Windows dla Panelu Rodzica.
+  // Nie zmienia rozmiaru ekranu logowania.
+  Future<void> _configureParentWindow() async {
+    await windowManager.setPreventClose(false);
+    await windowManager.setAlwaysOnTop(false);
+    await windowManager.setTitleBarStyle(TitleBarStyle.normal);
+    await windowManager.setFullScreen(false);
+    await windowManager.maximize();
+    await windowManager.show();
+    await windowManager.focus();
+  }
+
   @override
   void initState() {
     super.initState();
+
     _isAuthorized = widget.initialAuthorized;
+
     _checkForUpdatesSilently();
+
+    // Maksymalizujemy okno dopiero po wejściu do autoryzowanego
+    // Panelu Rodzica. Ekran logowania pozostaje bez zmian.
+    if (widget.initialAuthorized) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _configureParentWindow();
+      });
+    }
   }
 
   @override
@@ -107,8 +130,13 @@ class _ParentDashboardScreenState extends State<ParentDashboardScreen> {
     }
   }
 
-  void _verifyMasterPin() {
+  // Weryfikacja PIN-u i otwarcie zmaksymalizowanego Panelu Rodzica.
+  Future<void> _verifyMasterPin() async {
     if (_pinController.text == ParentAccount.pin) {
+      await _configureParentWindow();
+
+      if (!mounted) return;
+
       setState(() {
         _isAuthorized = true;
       });
